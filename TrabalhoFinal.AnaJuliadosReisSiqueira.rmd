@@ -1,0 +1,399 @@
+---
+title: "Trabalho Final"
+author: "Ana Júlia dos Reis Siqueira"
+date: "2025-01-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	error = FALSE,
+	message = FALSE,
+	warning = FALSE,
+	tidy = FALSE
+)
+```
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+Sys.setlocale("LC_ALL", "Portuguese_Brazil.1252")
+
+if (!requireNamespace("tinytex", quietly = TRUE)) {
+  install.packages("tinytex", quietly = TRUE)
+  tinytex::install_tinytex(quietly = TRUE)
+}
+
+required_packages <- c("tidyverse", "readr", "dplyr", "ggplot2", "knitr", "kableExtra")
+
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if (length(new_packages)) install.packages(new_packages, quietly = TRUE)
+
+lapply(required_packages, library, character.only = TRUE, quietly = TRUE)
+
+
+```
+
+```{r}
+
+file1 <- "C:/Users/mateu/Downloads/ca-2023-01.zip"
+file2 <- "C:/Users/mateu/Downloads/ca-2023-02.zip"
+
+data1 <- read_delim(unz(file1, "Pre\x87os semestrais - AUTOMOTIVOS_2023.01.csv"), delim = ";", locale = locale(decimal_mark = ","))
+data2 <- read_delim(unz(file2, "Pre\x87os semestrais - AUTOMOTIVOS_2023.02.csv"), delim = ";", locale = locale(decimal_mark = ","))
+
+data <- bind_rows(data1, data2)
+```
+
+```{r}
+data$`Data da Coleta` <- as.Date(data$`Data da Coleta`, format = "%d/%m/%Y")
+
+```
+
+# **Tratamento dos dados**
+
+  Neste item, iniciamos a apresentação das variáveis do conjunto de dados. As variáveis presentes são fundamentais para compreender o contexto das informações analisadas, como o tipo de combustível, a região, os preços e outros dados relacionados às vendas de combustíveis. Abaixo, listamos as variáveis que compõem o conjunto de dados.Durante a exploração destas, descobrimos as necessidades de tratamento inicial dos dados que será feito nesta seção. 
+
+
+```{r}
+library(knitr)
+
+variaveis <- colnames(data)
+
+kable(data.frame(Variáveis = variaveis), 
+      caption = "Variáveis do Banco de Dados", 
+      format = "markdown", 
+      booktabs = FALSE, 
+      align = "l", 
+      caption.short = "Variáveis do Banco de Dados")
+
+```
+
+
+  Na tabela a seguir, é possíver identificar a presença de valores ausentes nas variáveis do conjunto de dados. A identificação e o tratamento desses valores são cruciais para garantir a integridade da análise subsequente. 
+
+```{r results='asis'}
+missing_values <- data %>% summarise_all(~sum(is.na(.)))
+
+total_rows <- nrow(data)
+missing_percent <- round(missing_values / total_rows * 100, 2)
+
+missing_values <- tibble::rownames_to_column(as.data.frame(t(missing_values)), var = "Coluna")
+colnames(missing_values)[2] <- "Valores Faltantes"
+missing_percent <- tibble::rownames_to_column(as.data.frame(t(missing_percent)), var = "Coluna")
+colnames(missing_percent)[2] <- "Percentual Faltante (%)"
+
+missing_summary <- merge(missing_values, missing_percent, by = "Coluna", all = TRUE)
+
+kable(missing_summary, caption = "Tabela de Valores Faltantes", format = "markdown", booktabs = TRUE, align = "l")
+
+
+```
+
+
+  A análise dos valores ausentes revela que a maioria das variáveis está completa, com exceção das variáveis "Complemento" (76,94%) e "Valor de Compra" (100%). A variável "Complemento" será excluída, pois a alta proporção de dados ausentes compromete sua utilidade. A variável "Valor de Compra", devido à total ausência de dados, também será removida do conjunto de dados. Para as variáveis "Número Rua" e "Bairro", com valores ausentes em pequenas proporções (0,03% e 0,19%, respectivamente), optou-se por preencher os valores faltantes com "Desconhecido". Essa abordagem permite preservar todos os registros e garantir a consistência dos dados para as análises subsequentes.
+  
+
+```{r}
+#Tratamento dos dados faltantes
+data <- data %>% select(-Complemento)
+
+# Excluir a variável "Valor de Compra"
+data <- data %>% select(-`Valor de Compra`)
+
+# Preencher valores faltantes em "Numero Rua" com "Desconhecido"
+data$`Numero Rua`[is.na(data$`Numero Rua`)] <- "Desconhecido"
+
+# Preencher valores faltantes em "Bairro" com "Desconhecido"
+data$Bairro[is.na(data$Bairro)] <- "Desconhecido"
+
+
+```
+
+  Ainda neste momento de tratamento dos dados recebidos, nota-se que a coluna "Unidade de Medida" contém diferentes unidades ("R$ / litro" e "R$ / m³"), o que impacta diretamente na comparação dos valores de venda. Como um metro cúbico (m³) equivale a 1000 litros, os valores de venda expressos em "R$ / m³" são significativamente maiores. Para garantir uma análise consistente e precisa, foi realizada a conversão de todos os valores de "R$ / m³" para "R$ / litro", dividindo esses valores por 1000. Com essa padronização, todos os registros utilizam "R$ / litro" como unidade de medida, permitindo comparações justas e precisas entre os dados. Também alteramos o nome das colunas Regiao - Sigla e Estado - Sigla para apenas Regiao e Estado.
+
+```{r}
+
+
+library(dplyr)
+
+# Renomear as colunas
+data <- data %>%
+  rename(
+    Regiao = `Regiao - Sigla`,  # Renomeia 'Regiao - Sigla' para 'Regiao'
+    Estado = `Estado - Sigla`   # Renomeia 'Estado - Sigla' para 'Estado'
+  )
+
+
+
+```
+
+
+# **Análise exploratória das variáveis categóricas**
+
+A análise exploratória das variáveis categóricas é fundamental para compreender a distribuição e a influência de fatores geográficos, operacionais e comerciais nos preços dos combustíveis. Neste estudo, focamos em cinco variáveis consideradas de maior relevância: Região, Estado, Produto e Bandeira. Essas variáveis permitem identificar padrões regionais, comparar preços entre diferentes localidades, entender a oferta de tipos de combustíveis e analisar a atuação das bandeiras dos postos revendedores. A seguir, exploramos a frequência e a distribuição dessas categorias, buscando insights que possam revelar as dinâmicas presentes nos nossos dados.
+
+
+## **Variável 'Região'**
+
+O gráfico de distribuição das regiões a seguir mostra que a região Sudeste (SE) possui a maior concentração de observações, indicando uma maior densidade de postos de combustível ou uma coleta de dados mais intensa nessa região. Em contraste, as regiões Norte (N) e Centro-Oeste (CO) apresentam um número significativamente menor de registros, o que pode refletir uma menor presença de postos ou uma coleta de dados menos abrangente. Essa distribuição desbalanceada sugere que análises comparativas entre regiões devem ser feitas com cautela, considerando a diferença na quantidade de dados disponíveis.
+
+```{r fig.width=6, fig.height=4}
+ggplot(data, aes(x = Regiao)) +
+  geom_bar(fill = "skyblue") +
+  scale_y_continuous(labels = scales::comma_format()) + 
+  labs(title = "Distribuição das Regiões", x = "Região", y = "Contagem") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5) 
+  )
+
+
+```
+
+## **Variável Estado**
+
+A análise da variável Estado revela uma distribuição desigual das observações ao longo do território brasileiro. O estados de SP (São Paulo), lidera em disparado o número de registros, seguido por MG (Minas Gerais) e RJ (Rio de Janeiro), localizados todos na região Sudeste, refletindo a maior densidade populacional e econômica dessa região, bem como a presença de uma rede mais extensa de postos de combustível. Em contraste, estados das regiões Norte e Centro-Oeste, como RR (Roraima) e MT (Mato Grosso), possuem um número menor de observações, o que pode estar relacionado à menor densidade populacional e à distribuição geográfica mais dispersa dos postos de revenda. Essa disparidade na distribuição dos dados sugere que análises comparativas entre estados devem considerar o volume de informações disponíveis, evitando generalizações que possam ser enviesadas pela desigualdade na representatividade dos dados.
+
+```{r}
+ggplot(data, aes(x = Estado)) +
+  geom_bar(fill = "lightblue") +
+  labs(
+    title = "Distribuição dos Estados",
+    x = "Estado",
+    y = "Número de Observações"  
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    plot.title = element_text(hjust = 0.5) 
+  )
+
+```
+
+## **Variável 'Produto'**
+
+A análise da distribuição dos tipos de combustíveis no gráfico abaixo revela que a gasolina é o produto mais frequente, com 232.085 observações, seguida pelo etanol (197.849) e pela gasolina aditivada (180.978). O diesel S10 (168.461) e o diesel comum (106.136) têm participações menores, enquanto o GNV (18.491) é o combustível menos representado. Essa distribuição desbalanceada reflete a predominância da gasolina no mercado de combustíveis, enquanto outros produtos, como etanol e diesel S10, têm participações significativas, mas menores. O GNV, por sua vez, é um nicho de mercado com pouca representatividade. Para análises futuras, é importante considerar essa disparidade na representatividade dos dados, especialmente ao comparar preços ou tendências entre diferentes tipos de combustíveis.
+
+
+```{r}
+ggplot(data, aes(x = Produto)) +
+  geom_bar(fill = "skyblue") +
+  labs(
+    title = "Distribuição dos Tipos de Produto",
+    x = "Produto",
+    y = "Contagem (em milhares)"  
+  ) +
+  scale_y_continuous(labels = scales::comma_format(scale = 1e-3, suffix = " mil")) + 
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),  
+    axis.text.x = element_text(angle = 45, hjust = 1)  
+  )
+
+
+```
+
+## **Variável 'Bandeira'**
+
+O gráfico abaixo apresenta as top 10 bandeiras de postos de combustível com suas frequencias e revela que a BRANCA (postos independentes) domina o mercado, com 305.325 observações, seguida pelas grandes redes IPIRANGA (200.682) e RAIZEN (127.588). Outras bandeiras, como VIBRA ENERGIA e VIBRA, também têm uma participação relevante, mas em menor escala. Bandeiras como ALESAT, SABBÁ e ATEM’S completam as top 10, mas com frequências significativamente menores. Essa distribuição desbalanceada indica que o mercado é altamente concentrado em postos independentes e algumas grandes redes, enquanto as demais bandeiras representam nichos regionais ou redes menores. Para análises futuras, é importante considerar essa concentração, especialmente ao comparar preços ou tendências entre diferentes bandeiras
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(stringi)
+
+bandeira_counts <- data %>%
+  count(Bandeira) %>%
+  arrange(desc(n))
+
+top_n <- 10 
+
+top_bandeiras <- bandeira_counts %>%
+  top_n(top_n, n)
+
+data_top <- data %>%
+  filter(Bandeira %in% top_bandeiras$Bandeira)
+
+titulo_grafico <- stringi::stri_encode(paste("Distribuicao das Top", top_n, "Bandeiras"), "", "UTF-8")
+
+formatar_numeros <- function(x) {
+  format(x, big.mark = ".", decimal.mark = ",", scientific = FALSE)
+}
+
+ggplot(data_top, aes(x = Bandeira)) +
+  geom_bar(fill = "skyblue") +
+  labs(title = titulo_grafico, x = "Bandeira", y = "Contagem") +
+  scale_y_continuous(labels = formatar_numeros) +  
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),  
+    plot.title = element_text(hjust = 0.5)  
+  )
+
+
+
+```
+
+## **Variável 'Data de Coleta'**
+
+O gráfico de distribuição das datas de coleta mostra como as coletas estão distribuídas ao longo do ano de 2023. Observa-se que as coletas estão relativamente bem distribuídas ao longo do tempo, sem picos ou quedas extremamente pronunciados. Isso sugere que o processo de coleta foi realizado de forma consistente e regular, sem grandes interrupções ou concentrações em períodos específicos. A distribuição parece seguir um padrão uniforme, com uma leve tendência de aumento no volume de coletas no meio do ano (em torno de julho, conforme indicado pela mediana e média). Isso pode estar relacionado a um maior monitoramento ou a um aumento na demanda por combustíveis durante esse período. Além disso, a ausência de picos abruptos ou lacunas significativas indica que o processo de coleta foi bem planejado e executado, cobrindo todo o ano de forma equilibrada. 
+
+```{r}
+library(ggplot2)
+
+ggplot(data, aes(x = `Data da Coleta`)) +
+  geom_histogram(binwidth = 30, fill = "skyblue", color = "black") +
+  labs(title = "Distribuicao das Datas de Coleta",
+       x = "Data da Coleta", y = "Contagem") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+
+```
+
+# **Valor de Venda e suas relações com as variáveis categóricas**
+## **Estatísticas Descritivas**
+
+A tabela abaixo apresenta a distribuição dos valores de venda de combustíveis. O valor mínimo registrado é de 2,39, um valor relativamente baixo, mas dentro de uma faixa aceitável, sem indicar um possível outlier. A mediana (5,49) é maior que a média (5,30), sugerindo uma leve assimetria à esquerda, com alguns valores mais baixos influenciando a média. A maioria dos valores está entre 4,84 (Q1) e 5,94 (Q3), indicando uma dispersão moderada. O valor máximo (9,79) está bem acima do Q3, sugerindo a presença de alguns valores extremos. Em resumo, os dados apresentam uma distribuição ligeiramente assimétrica, com a maior parte dos valores concentrados na faixa intermediária, como pode ser observado no gráfico.
+
+
+```{r}
+library(knitr)
+library(dplyr)
+
+estatisticas <- data %>% 
+  summarise(
+    `Valor Mínimo` = min(`Valor de Venda`, na.rm = TRUE),
+    `1º Quartil (Q1)` = quantile(`Valor de Venda`, 0.25, na.rm = TRUE),
+    Mediana = median(`Valor de Venda`, na.rm = TRUE),
+    Média = mean(`Valor de Venda`, na.rm = TRUE),
+    `3º Quartil (Q3)` = quantile(`Valor de Venda`, 0.75, na.rm = TRUE),
+    `Valor Máximo` = max(`Valor de Venda`, na.rm = TRUE)
+  )
+
+estatisticas <- as.data.frame(t(estatisticas))
+colnames(estatisticas) <- "Valor"
+estatisticas$Estatística <- rownames(estatisticas)
+estatisticas <- estatisticas[, c("Estatística", "Valor")]
+
+kable(estatisticas, caption = "Resumo Estatístico do Valor de Venda", format = "markdown", booktabs = TRUE)
+
+
+```
+```{r}
+
+library(knitr)
+
+estatisticas <- data.frame(
+  Estatística = c("Valor Mínimo", "1º Quartil (Q1)", "Mediana", "Média", "3º Quartil (Q3)", "Valor Máximo"),
+  Valor = c(2.39, 4.84, 5.49, 5.30, 5.94, 9.79),
+  stringsAsFactors = FALSE
+)
+
+estatisticas$Estatística <- enc2utf8(estatisticas$Estatística)
+
+kable(estatisticas, col.names = c("Estatística", "Valor"), 
+      caption = "Resumo Estatístico do Valor de Venda")
+
+
+
+library(ggplot2)
+
+range(data$`Valor de Venda`)
+
+ggplot(data, aes(x = `Valor de Venda`)) +
+  geom_histogram(binwidth = 0.5, fill = "skyblue", color = "black") +  
+  labs(title = "Distribuição dos Valores de Venda",
+       x = "Valor de Venda", y = "Contagem") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+
+```
+
+
+## **Relação entre valor de venda e estado**
+
+O boxplot dos preços de venda de combustíveis por estado revela que a maioria dos estados tem preços concentrados entre 5 e 6 reais, com exceção do Acre, cuja mediana é mais alta (aproximadamente 6,59 reais). A dispersão dos dados é moderada para a maioria dos estados, mas alguns, como Mato Grosso e Goiás, apresentam grandes variações nos preços, o que indica uma maior diversidade nos valores praticados. Estados como Rio Grande do Sul e Santa Catarina têm distribuições mais homogêneas, com bigodes curtos. Por outro lado, Amazonas e Roraima apresentam uma distribuição mais estável, com poucos ou nenhum outlier. A presença de outliers em estados como Rio Grande do Sul e Santa Catarina sugere preços extremos, possivelmente indicativos de situações atípicas, como preços muito baixos ou altos.
+
+```{r}
+library(ggplot2)
+
+ggplot(data, aes(x = Estado, y = `Valor de Venda`)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Valores de Venda por Estado",
+       x = "Estado", y = "Valor de Venda") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+```
+
+## **Relação entre valor de venda e região**
+
+Ao comparar os boxplots por estado e por região, observa-se que a distribuição por estados apresenta mais variação, especialmente em locais como Rio Grande do Sul e Santa Catarina, que possuem muitos outliers, indicando preços mais dispersos. Já nas regiões, a Região Sul se destaca com um número considerável de outliers, mas as medianas ficam mais próximas entre as regiões. A Região Norte apresenta preços mais elevados, com menos variação, ao contrário do Sul, onde a dispersão é maior. Isso sugere que, enquanto os estados mostram grande variabilidade em alguns casos, as regiões têm uma distribuição um pouco mais homogênea.
+
+```{r}
+ggplot(data, aes(x = Regiao, y = `Valor de Venda`)) +
+  geom_boxplot(fill = "skyblue", color = "black") +
+  labs(title = "Valores de Venda por Região",
+       x = "Região", y = "Valor de Venda") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+```
+
+
+## **Relação entre valor de venda e produto**
+
+A análise dos boxplots dos preços dos combustíveis revela que o Etanol é o mais acessível, com a mediana mais baixa, enquanto a Gasolina e a Gasolina Aditivada apresentam preços mais elevados. O GNV e a Gasolina Aditivada mostram menor variação nos preços, indicando maior estabilidade, enquanto o Diesel e o Diesel S10 têm maior volatilidade, com vários outliers, o que sugere flutuações significativas. Para consumidores em busca de opções mais baratas, o Etanol é a escolha mais vantajosa, enquanto aqueles que buscam maior previsibilidade podem preferir o GNV ou a Gasolina Aditivada. Esses insights ajudam a entender as dinâmicas de preços e a identificar oportunidades de compra mais eficientes.
+
+
+```{r}
+ggplot(data, aes(x = Produto, y = `Valor de Venda`)) +
+  geom_boxplot(fill = "skyblue", color = "black") +
+  labs(title = "Valores de Venda por Tipo de Combustível",
+       x = "Produto", y = "Valor de Venda") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+```
+
+
+## **Relação entre valor de venda e bandeira**
+
+A análise do boxplot abaixo para as 10 bandeiras mais frequentes revela diferenças interessantes nos valores de venda de combustíveis. A mediana dos preços de venda varia entre 5,34 e 6,19, com a bandeira ATEM' S apresentando a mediana mais alta, enquanto a BRANCA tem o valor mais baixo. As bandeiras IPIRANGA e VIBRA ENERGIA, com grandes quantidades de dados e valores medianos em torno de 5,59 e 5,39, respectivamente, são destacadas pelo maior número de outliers, sugerindo maior variação nos preços de venda em comparação com as outras bandeiras. Outras bandeiras, como RAIZEN MIME e SABBÁ, têm IQRs menores, refletindo menor variação nos preços. O número de outliers também é mais expressivo em bandeiras como BRANCA e VIBRA, indicando uma dispersão maior nos preços desses combustíveis. A distribuição dos dados sugere que, apesar da variação nos preços entre as bandeiras, algumas apresentam uma distribuição mais concentrada, enquanto outras têm valores de venda mais dispersos e com mais flutuações.
+
+```{r}
+
+library(dplyr)
+
+bandeira_counts <- data %>% 
+  count(Bandeira) %>% 
+  arrange(desc(n)) %>% 
+  top_n(10, n)
+
+data_top_bandeiras <- data %>%
+  filter(Bandeira %in% bandeira_counts$Bandeira)
+library(ggplot2)
+
+ggplot(data_top_bandeiras, aes(x = Bandeira, y = `Valor de Venda`)) +
+  geom_boxplot(fill = "lightblue", color = "black") +
+  labs(title = "Valores de Venda por Bandeira (Top 10)",
+       x = "Bandeira", y = "Valor de Venda") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +  
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+
+
+
+```
+
+# **Conclusões**
+
+O tratamento dos dados foi fundamental para garantir a qualidade e a consistência das análises realizadas. A identificação e remoção de valores ausentes, como nas variáveis "Complemento" e "Valor de Compra", além do preenchimento de dados faltantes em "Número Rua" e "Bairro" com "Desconhecido", permitiram preservar a integridade do conjunto de dados. A padronização da unidade de medida para "R$/litro" eliminou inconsistências e facilitou comparações precisas entre os valores de venda. Além disso, a detecção e tratamento de outliers, utilizando o método IQR, assegurou que os dados analisados estivessem dentro de uma faixa estatisticamente relevante, evitando distorções nas conclusões. Esses procedimentos foram essenciais para preparar os dados para análises exploratórias e modelagens posteriores.
+
+A análise exploratória das variáveis categóricas revelou padrões importantes, como a predominância da região Sudeste e do estado de São Paulo no volume de dados, a concentração de postos independentes (bandeira BRANCA) e a predominância da gasolina como o produto mais vendido. A distribuição uniforme das datas de coleta ao longo de 2023 indicou um processo de coleta consistente e bem planejado. A análise dos valores de venda mostrou uma leve assimetria à esquerda, com a maioria dos preços concentrados entre 4,69 e 5, e destacou a influência de fatores como região, estado, tipo de combustível e bandeira nos preços praticados. Esses insights fornecem uma base sólida para análises mais aprofundadas e decisões estratégicas no setor de combustíveis.
+
